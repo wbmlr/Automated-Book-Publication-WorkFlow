@@ -1,0 +1,4 @@
+uvicorn api:api --reload
+
+kill -9 $(lsof -i :8000 | awk '{print $2}' | tail -n 1)
+tree -I '__pycache__|node_modules|.venv|public'

@@ -1,0 +1,53 @@
+import os
+from config import URL, CONTENT_DIR, SCREENSHOT_DIR, BOOK_ID, CHAPTER_ID
+from scraper.content_fetcher import fetch_and_screenshot
+from ai_services.llm_agents import AIWriter, AIReviewer
+from hitl.human_interaction import get_human_approval, get_human_feedback
+from storage.chromadb_manager import store_final_version
+from retrieval.search_interface import retrieve_version
+
+# 1. Scraping
+raw_content_path = os.path.join(CONTENT_DIR, "chapter_raw.txt")
+screenshot_path = os.path.join(SCREENSHOT_DIR, f"{CHAPTER_ID}_screenshot.png")
+raw_text = fetch_and_screenshot(URL, raw_content_path, screenshot_path)
+print("Scraping complete.")
+
+# 2. AI & HITL Iterations
+writer, reviewer = AIWriter(), AIReviewer()
+current_text, feedback, iteration = raw_text, "none", 0
+while iteration < 5: # Max 5 iterations
+    iteration += 1
+    print(f"\n--- Starting Iteration {iteration} ---")
+    spun_text = writer.spin(current_text, feedback)
+    refined_text = reviewer.refine(spun_text)
+
+    if get_human_approval(refined_text):
+        final_text = refined_text
+        final_path = os.path.join(CONTENT_DIR, f"chapter_final_v{iteration}.txt")
+        with open(final_path, "w") as f: f.write(final_text)
+        store_final_version(BOOK_ID, CHAPTER_ID, final_text)
+        print("Final version approved and stored.")
+        break
+    else:
+        current_text = refined_text # Use refined text for next iteration
+        feedback = get_human_feedback()
+
+# 3. Retrieval Example
+retrieved = retrieve_version(BOOK_ID, "What is this chapter about?")
+print(f"\n--- Retrieval Test ---\n{retrieved['documents'][0][0][:200]}...")
+
+# 4. RL-Enhanced Retrieval & Feedback Loop
+print("\n--- RL-Enhanced Retrieval & Feedback Loop ---")
+query = "What is this chapter about?"
+retrieved, action_taken = retrieve_version(BOOK_ID, query)
+
+if retrieved['documents']:
+    print(f"\n--- Retrieval Result ---\n{retrieved['documents'][0][0][:250]}...")
+    was_good = input("Was this retrieval useful? [y/n]: ").lower() == 'y'
+    reward = 1.0 if was_good else -1.0
+    
+    from retrieval.search_interface import agent
+    agent.update(action_taken, reward)
+    agent.save_policy()
+else:
+    print("Could not retrieve any documents.")
